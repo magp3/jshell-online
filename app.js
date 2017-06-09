@@ -42,7 +42,7 @@ var opts = require('optimist')
 var runhttps = false;
 var sshport = 22;
 var sshhost = 'localhost';
-var sshauth = 'password';
+var sshauth = 'publickey';
 var globalsshuser = '';
 
 if (opts.sshport) {
@@ -90,45 +90,44 @@ if (runhttps) {
     });
 }
 
-var io = server(httpserv,{path: '/wetty/socket.io'});
-io.on('connection', function(socket){
-    var sshuser = '';
-    var request = socket.request;
-    console.log((new Date()) + ' Connection accepted.');
-    if (match = request.headers.referer.match('/wetty/ssh/.+$')) {
-        sshuser = match[0].replace('/wetty/ssh/', '') + '@';
-    } else if (globalsshuser) {
-        sshuser = globalsshuser + '@';
-    }
+var spawnTerm = (socket) => 
+{
+    socket.emit("output","Loading jshell..\r\n");
+    let term =  pty.spawn('jshell', [], {
+    name: 'xterm-256color',
+    cols: 80,
+    rows: 30
+  });
 
-    var term;
-    if (process.getuid() == 0) {
-        term = pty.spawn('/bin/login', [], {
-            name: 'xterm-256color',
-            cols: 80,
-            rows: 30
-        });
-    } else {
-        term = pty.spawn('ssh', [sshuser + sshhost, '-p', sshport, '-o', 'PreferredAuthentications=' + sshauth], {
-            name: 'xterm-256color',
-            cols: 80,
-            rows: 30
-        });
-    }
-    console.log((new Date()) + " PID=" + term.pid + " STARTED on behalf of user=" + sshuser)
-    term.on('data', function(data) {
-        socket.emit('output', data);
-    });
-    term.on('exit', function(code) {
-        console.log((new Date()) + " PID=" + term.pid + " ENDED")
-    });
+    console.log((new Date()) + " PID=" + term.pid + " STARTED")
+    socket.removeAllListeners("resize");
     socket.on('resize', function(data) {
         term.resize(data.col, data.row);
     });
+    socket.removeAllListeners("input");
     socket.on('input', function(data) {
+        console.log(data);
         term.write(data);
     });
+    socket.removeAllListeners("disconnect");
     socket.on('disconnect', function() {
         term.end();
     });
+    term.on('exit', function(code) {
+        console.log((new Date()) + " PID=" + term.pid + " ENDED")
+        socket.emit("output","Terminal exited.\r\n");
+        term = spawnTerm(socket);
+    });
+    term.on('data', function(data) {
+        socket.emit('output', data);
+    });
+  return term;
+
+};
+var io = server(httpserv,{path: '/wetty/socket.io'});
+io.on('connection', function(socket){
+    var request = socket.request;
+    console.log((new Date()) + ' Connection accepted.');
+
+    var term = spawnTerm(socket);
 })
