@@ -106,12 +106,13 @@ var spawnTerm = (socket) =>
     });
     socket.removeAllListeners("input");
     socket.on('input', function(data) {
-        console.log(data);
         term.write(data);
     });
     socket.removeAllListeners("disconnect");
     socket.on('disconnect', function() {
-        term.end();
+        console.log("user disconnected");
+        term.removeAllListeners("exit");
+        term.destroy();
     });
     term.on('exit', function(code) {
         console.log((new Date()) + " PID=" + term.pid + " ENDED")
